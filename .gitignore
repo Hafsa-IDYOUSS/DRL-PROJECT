@@ -1,0 +1,15 @@
+venv/
+
+data/
+
+models/
+
+results/
+
+__pycache__/
+*.pyc
+
+.ipynb_checkpoints/
+
+*.pth
+*.zip
