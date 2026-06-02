@@ -1,15 +1,16 @@
 import json
-
 import torch
 import torch.nn as nn
 
+from torch.utils.data import DataLoader
+from torchvision.datasets import ImageFolder
+
 from feature_extraction import FeatureExtractor
-from dataset import get_dataloaders
 from domain_adaptation import coral_loss
 
 from preprocessing import (
-    get_transform_by_sequence,
-    get_target_domain_transforms
+    get_baseline_transforms,
+    get_transform_by_sequence
 )
 
 
@@ -22,19 +23,42 @@ with open("../results/rl_policy.json", "r") as f:
 
 best_sequence = policy["best_sequence_actions"]
 
-print("Using DRL-selected sequence for source:", best_sequence)
+print("Using DRL sequence:", best_sequence)
 
-train_loader, val_loader, test_loader = get_dataloaders(
+source_dataset = ImageFolder(
     "../data_resplit/train",
-    "../data_resplit/val",
-    "../data_resplit/test",
-    train_transform=get_transform_by_sequence(best_sequence),
-    eval_transform=get_target_domain_transforms(),
-    batch_size=32
+    transform=get_transform_by_sequence(best_sequence)
+)
+
+target_dataset = ImageFolder(
+    "../data_target/train",
+    transform=get_baseline_transforms()
+)
+
+target_val_dataset = ImageFolder(
+    "../data_target/val",
+    transform=get_baseline_transforms()
+)
+
+source_loader = DataLoader(
+    source_dataset,
+    batch_size=32,
+    shuffle=True
+)
+
+target_loader = DataLoader(
+    target_dataset,
+    batch_size=32,
+    shuffle=True
+)
+
+target_val_loader = DataLoader(
+    target_val_dataset,
+    batch_size=32,
+    shuffle=False
 )
 
 feature_extractor = FeatureExtractor().to(device)
-
 classifier = nn.Linear(2048, 2).to(device)
 
 optimizer = torch.optim.Adam(
@@ -46,7 +70,7 @@ optimizer = torch.optim.Adam(
 criterion = nn.CrossEntropyLoss()
 
 lambda_da = 0.1
-EPOCHS = 5
+EPOCHS = 10
 best_val_acc = 0
 
 for epoch in range(EPOCHS):
@@ -56,14 +80,14 @@ for epoch in range(EPOCHS):
 
     running_loss = 0
 
-    for source_batch, target_batch in zip(train_loader, val_loader):
+    for source_batch, target_batch in zip(source_loader, target_loader):
 
         imgs_s, labels_s = source_batch
         imgs_t, _ = target_batch
 
         imgs_s = imgs_s.to(device)
-        imgs_t = imgs_t.to(device)
         labels_s = labels_s.to(device)
+        imgs_t = imgs_t.to(device)
 
         feat_s = feature_extractor(imgs_s)
         feat_t = feature_extractor(imgs_t)
@@ -89,7 +113,7 @@ for epoch in range(EPOCHS):
 
     with torch.no_grad():
 
-        for images, labels in val_loader:
+        for images, labels in target_val_loader:
 
             images = images.to(device)
             labels = labels.to(device)
@@ -106,7 +130,7 @@ for epoch in range(EPOCHS):
 
     print(f"Epoch {epoch+1}/{EPOCHS}")
     print(f"Loss: {running_loss:.4f}")
-    print(f"Validation Accuracy: {val_acc:.4f}")
+    print(f"Target Validation Accuracy: {val_acc:.4f}")
 
     if val_acc > best_val_acc:
 
@@ -121,5 +145,3 @@ for epoch in range(EPOCHS):
         )
 
         print("Best DRL + CORAL model saved.")
-
-print("DRL + CORAL training finished.")
